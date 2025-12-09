@@ -55,7 +55,25 @@ class AcclerometerDB:
         
         return pd.concat(chunks, ignore_index = True)
     
+    def get_birds_ids(self) -> List[str]:
+        """Get list of all bird IDs in database"""
+        query = "SELECT DISTINCT bird_id FROM accelerometer_data"
+        df = pd.read_sql_query(query, self.engine)
+        return df['bird_id'].tolist()
     
+    def get_deployment_info(self, bird_id: str) -> Dict:
+        """Get deployment information for a bird"""
+        query = f"""
+        SELECT * FROM deployment_info
+        WHERE bird_id = '{bird_id}'
+        """
+        df = pd.read_sql_query(query, self.engine)
+        return df.to_dict('records')[0] if len(df) > 0 else {}
+    
+    
+
+
+
 
 
 
