@@ -97,6 +97,97 @@ class FeatureExtractor:
         features['corr_yz'] = np.corrcoef(window['acc_y'], window['acc_z'])[0, 1]
 
         return features
+    
+    def extract_frequency_domain_features(self, window: pd.DataFrame) -> Dict:
+        """
+        Extract frequency-domain features using FFT
+        
+        Features include:
+        - Dominant frequency
+        - Spectral entropy
+        - Power in frequency bands
+        """
+
+        features = {}
+
+        for axis in ['acc_x', 'acc_y', 'acc_z']:
+            values = window[axis].values
+
+        # FFT
+        fft_vals = np.fft.rfft(values)
+        fft_freq = np.fft.rfftfreq(len(values), 1/self.sampling_rate)
+        power = np.abs(fft_vals)**2
+
+        #Dominant frequency
+        dominant_idx = np.argmax(power[1:]) + 1  # Skip DC component
+        features[f'{axis}_dominant_freq'] = fft_freq[dominant_idx]
+        features[f'{axis}_dominant_power'] = power[dominant_idx]
+
+        # Spectral entropy
+        power_norm = power / np.sum(power)
+        power_norm = power_norm[power_norm > 0]
+        features[f'{axis}_spectral_entropy'] = -np.sum(
+                power_norm * np.log2(power_norm)
+        )
+
+        # Power in frequency bands
+        # Low: 0-2 Hz, Medium: 2-5 Hz, High: 5-12.5 Hz
+        low_mask = (fft_freq >= 0) & (fft_freq < 2)
+        mid_mask = (fft_freq >= 2) & (fft_freq < 5)
+        high_mask = (fft_freq >= 5)
+        
+        features[f'{axis}_power_low'] = np.sum(power[low_mask])
+        features[f'{axis}_power_mid'] = np.sum(power[mid_mask])
+        features[f'{axis}_power_high'] = np.sum(power[high_mask])
+
+        return features
+    
+    def extract_all_features(self, window: pd.DataFrame) -> Dict:
+        """Extract both time and frequency domain features"""
+
+        features = {}
+        features.update(self.extract_time_domain_features(window))
+        features.update(self.extract_frequency_domain_features(window))
+
+        # Add window metadata
+        if 'behavior' in window.columns:
+            features['behavior'] = window['behavior'].mode()[0]
+        if 'bird_id' in window.columns:
+            features['bird_id'] = window['bird_id'].iloc[0]
+        if 'timestamp' in window.columns:
+            features['timestamp'] = window['timestamp'].iloc[0]
+
+        return features
+    
+    def process_dataset(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Process entire dataset: create windows and extract features
+        
+        Args:
+            data: Full accelerometer dataset
+        
+        Returns:
+            DataFrame with one row per window and features as columns
+        """
+        windows = self.create_windows(data)
+        features_list = []
+        
+        for window in windows:
+            features = self.extract_all_features(window)
+            features_list.append(features)
+        
+        return pd.DataFrame(features_list)
+        
+        
+
+
+
+
+
+
+
+
+
         
 
 
