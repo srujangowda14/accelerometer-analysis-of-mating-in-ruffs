@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from scipy import optimize
 from typing import Tuple
+from typing import Dict, List
 
 class AccelerometerCalibrator:
     """Calibrate accelerometer data"""

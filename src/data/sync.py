@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedealta
+from datetime import datetime, timedelta
 from typing import Optional
 
 class TimeSynchronizer:
@@ -17,7 +17,7 @@ class TimeSynchronizer:
     def align_timestamps(self,
                          acc_data: pd.DataFrame,
                          video_data: pd.DataFrame,
-                         time_offset: Optional[timedealta]):
+                         time_offset: Optional[timedelta]):
         """
         Align accelerometer data with video observations
         Args:

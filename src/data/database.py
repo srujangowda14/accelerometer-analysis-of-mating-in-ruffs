@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from typing import List, Optional, Dict
 import logging
 
-class AcclerometerDB:
+class AccelerometerDB:
     """Interface for the accelerometr DB"""
 
     def __init__(self, db_path: str):
@@ -34,7 +34,7 @@ class AcclerometerDB:
         """
         
         query = f"""
-        SELECT timestamp, acc_x, acc_y, acc-z
+        SELECT timestamp, acc_x, acc_y, acc_z
         FROM accelerometer_data
         WHERE bird_id = '{bird_id}'
         """
@@ -55,7 +55,7 @@ class AcclerometerDB:
         
         return pd.concat(chunks, ignore_index = True)
     
-    def get_birds_ids(self) -> List[str]:
+    def get_bird_ids(self) -> List[str]:
         """Get list of all bird IDs in database"""
         query = "SELECT DISTINCT bird_id FROM accelerometer_data"
         df = pd.read_sql_query(query, self.engine)
