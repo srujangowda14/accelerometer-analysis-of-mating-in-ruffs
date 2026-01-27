@@ -3,6 +3,7 @@ import argparse
 from pathlib import Path
 import logging
 import subprocess
+import shutil
 
 # Setup logging
 logging.basicConfig(
@@ -10,6 +11,19 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def get_python_command():
+    """Detect the correct Python command for this system"""
+    # Try to find python3 first (common on Mac/Linux)
+    if shutil.which('python3'):
+        return 'python3'
+    # Fall back to python
+    elif shutil.which('python'):
+        return 'python'
+    # Use the current Python interpreter as last resort
+    else:
+        return sys.executable
 
 
 def run_pipeline(raw_dir: str = 'data/raw',
@@ -44,6 +58,9 @@ def run_pipeline(raw_dir: str = 'data/raw',
     logger.info("="*70)
     
     scripts_dir = Path(__file__).parent
+    python_cmd = get_python_command()
+    
+    logger.info(f"\nUsing Python command: {python_cmd}")
     
     # Step 1: Calibration
     if not skip_calibration:
@@ -55,7 +72,7 @@ def run_pipeline(raw_dir: str = 'data/raw',
             calibration_file = f'{raw_dir}/calibration_recordings_6O_Apr2022.csv'
         
         cmd = [
-            'python', str(scripts_dir / 'calibrate_data.py'),
+            python_cmd, str(scripts_dir / 'calibrate_data.py'),
             '--input', raw_dir,
             '--output', clean_dir,
             '--calibration-file', calibration_file
@@ -82,7 +99,7 @@ def run_pipeline(raw_dir: str = 'data/raw',
         logger.info("="*70)
         
         cmd = [
-            'python', str(scripts_dir / 'extract_features.py'),
+            python_cmd, str(scripts_dir / 'extract_features.py'),
             '--input', clean_dir,
             '--output', features_dir,
             '--window-size', '1.0',
@@ -112,7 +129,7 @@ def run_pipeline(raw_dir: str = 'data/raw',
         features_file = f'{features_dir}/windowed_features.csv'
         
         cmd = [
-            'python', str(scripts_dir / 'train_models.py'),
+            python_cmd, str(scripts_dir / 'train_models.py'),
             '--features', features_file,
             '--output', models_dir,
             '--models', 'rf', 'hmm'  # Skip NN for faster training
@@ -138,7 +155,7 @@ def run_pipeline(raw_dir: str = 'data/raw',
         features_file = f'{features_dir}/windowed_features.csv'
         
         cmd = [
-            'python', str(scripts_dir / 'evaluate_models.py'),
+            python_cmd, str(scripts_dir / 'evaluate_models.py'),
             '--features', features_file,
             '--models', models_dir,
             '--output', results_dir

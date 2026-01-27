@@ -62,9 +62,14 @@ def extract_features(input_dir: str,
     if bird_list_file.exists():
         with open(bird_list_file, 'r') as f:
             bird_ids = [line.strip() for line in f if line.strip()]
+       
     else:
         bird_ids = [f.stem.replace('_calibrated', '') 
                    for f in Path(input_dir).glob('*_calibrated.csv')]
+      # Debug: print what we found
+    logger.info(f"Bird list file: {bird_list_file}")
+    logger.info(f"Bird list exists: {bird_list_file.exists()}")
+    logger.info(f"Bird IDs found: {bird_ids}")
     
     if bird_limit:
         bird_ids = bird_ids[:bird_limit]

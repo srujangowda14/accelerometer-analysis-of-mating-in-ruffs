@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from typing import Tuple, List
 
-class BehaviorHmm:
+class BehaviorHMM:
     """Hidden Markov Model for behavior classification"""
 
     def __init__(self, n_states: int = 13, n_iter: int = 100,
