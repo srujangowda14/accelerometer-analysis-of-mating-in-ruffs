@@ -103,7 +103,9 @@ def run_pipeline(raw_dir: str = 'data/raw',
             '--input', clean_dir,
             '--output', features_dir,
             '--window-size', '1.0',
-            '--overlap', '0.5'
+            '--overlap', '0.5',
+            '--sampling-rate', '50.0',
+            '--min-label-purity', '0.8'
         ]
         
         if bird_limit:
