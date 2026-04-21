@@ -1,15 +1,14 @@
 import sys
 import argparse
+import json
 from pathlib import Path
 import logging
 import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from src.data.loader import AccelerometerDataLoader
 from src.models.random_forest import BehaviorRandomForest
 from src.models.hmm import BehaviorHMM
 from src.models.neural_network import BehaviorNeuralNetwork
@@ -20,6 +19,50 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def prepare_feature_table(features: pd.DataFrame) -> tuple[pd.DataFrame, str, list[str]]:
+    """Filter features and determine the grouping column for leakage-safe splits."""
+    if 'behavior' not in features.columns:
+        raise ValueError("No behavior labels found in features")
+
+    filtered = features[features['behavior'] != 'unknown'].copy()
+
+    group_col = None
+    for candidate in ['bird_id', 'recording_id']:
+        if candidate in filtered.columns and filtered[candidate].nunique() > 1:
+            group_col = candidate
+            break
+
+    if group_col is None:
+        raise ValueError(
+            "Features must contain a grouping column such as 'bird_id' or "
+            "'recording_id' for leakage-safe splitting."
+        )
+
+    sort_cols = [group_col]
+    for candidate in ['timestamp', 'window_id']:
+        if candidate in filtered.columns:
+            sort_cols.append(candidate)
+    filtered = filtered.sort_values(sort_cols).reset_index(drop=True)
+
+    feature_cols = [
+        c for c in filtered.columns
+        if c not in ['behavior', 'bird_id', 'recording_id', 'timestamp', 'window_id', 'label_purity']
+    ]
+
+    return filtered, group_col, feature_cols
+
+
+def build_group_split(data: pd.DataFrame, group_col: str, test_size: float):
+    """Split by group to avoid overlapping windows from the same bird/recording leaking."""
+    splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=42)
+    train_idx, test_idx = next(
+        splitter.split(data, y=data['behavior'], groups=data[group_col])
+    )
+    train_df = data.iloc[train_idx].copy()
+    test_df = data.iloc[test_idx].copy()
+    return train_df, test_df
 
 
 def train_models(features_file: str,
@@ -46,35 +89,37 @@ def train_models(features_file: str,
     # Load features
     logger.info(f"\nLoading features from {features_file}")
     features = pd.read_csv(features_file)
-    
-    # Check for behavior labels
-    if 'behavior' not in features.columns:
-        logger.error("No behavior labels found in features!")
+
+    try:
+        features, group_col, feature_cols = prepare_feature_table(features)
+    except ValueError as exc:
+        logger.error(str(exc))
         return
-    
-    # Remove unknown behaviors
-    features = features[features['behavior'] != 'unknown'].copy()
     
     logger.info(f"Total samples: {len(features)}")
     logger.info(f"Behaviors: {features['behavior'].nunique()}")
-    
-    # Prepare data
-    meta_cols = ['behavior', 'bird_id', 'timestamp', 'window_id']
-    feature_cols = [c for c in features.columns if c not in meta_cols]
-    
+
     X = features[feature_cols]
     y = features['behavior']
     
     logger.info(f"Features: {len(feature_cols)}")
+    logger.info(f"Grouping split by: {group_col}")
     
     # Train/test split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=42, stratify=y
-    )
+    train_df, test_df = build_group_split(features, group_col, test_size)
+    X_train = train_df[feature_cols]
+    y_train = train_df['behavior']
+    X_test = test_df[feature_cols]
+    y_test = test_df['behavior']
     
     logger.info(f"\nTrain samples: {len(X_train)}")
     logger.info(f"Test samples: {len(X_test)}")
-    
+    logger.info(
+        "Train groups: %s | Test groups: %s",
+        train_df[group_col].nunique(),
+        test_df[group_col].nunique(),
+    )
+
     # Default to all models
     if models_to_train is None:
         models_to_train = ['rf', 'hmm', 'nn']
@@ -131,7 +176,11 @@ def train_models(features_file: str,
         logger.info(f"Number of states: {n_behaviors}")
         logger.info("Fitting model...")
         
-        hmm_model.fit(X_train.values)
+        hmm_model.fit(X_train.values, y_train.values)
+
+        hmm_path = output_path / 'hmm_model.pkl'
+        hmm_model.save_model(str(hmm_path))
+        logger.info(f"✓ Saved HMM to {hmm_path}")
         
         logger.info("✓ HMM training complete")
         
@@ -155,11 +204,16 @@ def train_models(features_file: str,
         logger.info("Training LSTM...")
         train_losses, val_losses = nn_model.fit(
             X_train, y_train,
+            groups=train_df[group_col],
             epochs=50,
             batch_size=32,
             validation_split=0.2,
             sequence_length=10
         )
+
+        nn_path = output_path / 'neural_network_model.pt'
+        nn_model.save_model(str(nn_path))
+        logger.info(f"✓ Saved Neural Network to {nn_path}")
         
         logger.info("✓ Neural network training complete")
         
@@ -185,7 +239,16 @@ def train_models(features_file: str,
         f.write(f"Number of features: {len(feature_cols)}\n")
         f.write(f"Number of behaviors: {y.nunique()}\n")
         f.write(f"Behaviors: {', '.join(sorted(y.unique()))}\n")
+        f.write(f"Grouping column: {group_col}\n")
         f.write(f"Models trained: {', '.join(trained_models.keys())}\n")
+
+    split_file = output_path / 'train_test_split.json'
+    split_metadata = {
+        'group_column': group_col,
+        'test_groups': sorted(test_df[group_col].astype(str).unique().tolist()),
+    }
+    with open(split_file, 'w') as f:
+        json.dump(split_metadata, f, indent=2)
     
     return trained_models
 
