@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
 import json
-from scipy import optimize
-from typing import Tuple, Dict, List
+from typing import Dict, List
+import logging
 
 
 class AccelerometerCalibrator:
@@ -10,6 +10,7 @@ class AccelerometerCalibrator:
     
     def __init__(self):
         self.calibration_params = {}
+        self.logger = logging.getLogger(__name__)
     
     def load_calibration_data(self, calibration_file: str) -> pd.DataFrame:
         """Load calibration recordings"""
@@ -31,9 +32,22 @@ class AccelerometerCalibrator:
         """
         params = {}
         
-        print("\nCalibration data columns:", cal_data.columns.tolist())
-        print("First few rows:")
-        print(cal_data.head())
+        raw_axes = [f'acc_{axis}' for axis in axes]
+        if not set(raw_axes).issubset(cal_data.columns):
+            self.logger.warning(
+                "Calibration file does not contain raw accelerometer columns. "
+                "Using identity calibration parameters."
+            )
+            params = {
+                f'{axis}_offset': 0.0
+                for axis in axes
+            }
+            params.update({
+                f'{axis}_scale': 1.0
+                for axis in axes
+            })
+            self.calibration_params = params
+            return params
         
         # Try to detect the orientation column
         orientation_col = None
@@ -42,12 +56,15 @@ class AccelerometerCalibrator:
         for name in possible_names:
             if name in cal_data.columns:
                 orientation_col = name
-                print(f"\nUsing '{name}' as orientation column")
+                self.logger.info("Using '%s' as orientation column", name)
                 break
         
         if orientation_col is None:
             # Try alternative method: look for columns with axis indicators
-            print("\nNo orientation column found. Trying alternative calibration method...")
+            self.logger.warning(
+                "No orientation column found in calibration file. "
+                "Trying fallback calibration method."
+            )
             return self._estimate_from_separate_columns(cal_data, axes)
         
         # Standard method with orientation column
@@ -63,19 +80,32 @@ class AccelerometerCalibrator:
                 mask = cal_data[orientation_col].astype(str).str.contains(pattern, case=False, na=False)
                 if mask.any():
                     pos_g = cal_data[mask][f'acc_{axis}'].values
-                    print(f"Found positive {axis} with pattern '{pattern}': {len(pos_g)} samples")
+                    self.logger.info(
+                        "Found positive %s orientation with pattern '%s' (%s samples)",
+                        axis,
+                        pattern,
+                        len(pos_g),
+                    )
                     break
             
             for pattern in neg_patterns:
                 mask = cal_data[orientation_col].astype(str).str.contains(pattern, case=False, na=False)
                 if mask.any():
                     neg_g = cal_data[mask][f'acc_{axis}'].values
-                    print(f"Found negative {axis} with pattern '{pattern}': {len(neg_g)} samples")
+                    self.logger.info(
+                        "Found negative %s orientation with pattern '%s' (%s samples)",
+                        axis,
+                        pattern,
+                        len(neg_g),
+                    )
                     break
             
             if pos_g is None or neg_g is None:
-                print(f"WARNING: Could not find calibration data for axis {axis}")
-                print(f"Unique values in {orientation_col}: {cal_data[orientation_col].unique()}")
+                self.logger.warning(
+                    "Could not find calibration data for axis %s. "
+                    "Falling back to identity for this axis.",
+                    axis,
+                )
                 # Use default values
                 params[f'{axis}_offset'] = 0.0
                 params[f'{axis}_scale'] = 1.0
@@ -98,7 +128,7 @@ class AccelerometerCalibrator:
         """
         params = {}
         
-        print("\nTrying to find calibration data in separate columns...")
+        self.logger.info("Trying to find calibration data in separate columns...")
         
         for axis in axes:
             # Look for columns like: acc_x_up, acc_x_down, or +x, -x
@@ -119,22 +149,19 @@ class AccelerometerCalibrator:
                 params[f'{axis}_offset'] = offset
                 params[f'{axis}_scale'] = scale
                 
-                print(f"Found {axis}: pos_col={pos_cols[0]}, neg_col={neg_cols[0]}")
+                self.logger.info(
+                    "Found %s calibration columns: pos=%s neg=%s",
+                    axis,
+                    pos_cols[0],
+                    neg_cols[0],
+                )
             else:
-                # Use simple mean/std calibration from all data
-                if f'acc_{axis}' in cal_data.columns:
-                    mean_val = cal_data[f'acc_{axis}'].mean()
-                    std_val = cal_data[f'acc_{axis}'].std()
-                    
-                    params[f'{axis}_offset'] = mean_val
-                    params[f'{axis}_scale'] = std_val if std_val > 0 else 1.0
-                    
-                    print(f"Using mean/std for {axis}: offset={mean_val:.3f}, scale={std_val:.3f}")
-                else:
-                    # Default values
-                    params[f'{axis}_offset'] = 0.0
-                    params[f'{axis}_scale'] = 1.0
-                    print(f"Using default values for {axis}")
+                params[f'{axis}_offset'] = 0.0
+                params[f'{axis}_scale'] = 1.0
+                self.logger.warning(
+                    "Falling back to identity calibration for axis %s",
+                    axis,
+                )
         
         self.calibration_params = params
         return params
@@ -154,7 +181,7 @@ class AccelerometerCalibrator:
         for axis in ['x', 'y', 'z']:
             col = f'acc_{axis}'
             if col not in calibrated.columns:
-                print(f"WARNING: Column {col} not found in data")
+                self.logger.warning("Column %s not found in data", col)
                 continue
                 
             offset = self.calibration_params.get(f'{axis}_offset', 0.0)
