@@ -1,7 +1,6 @@
 import sys
 import argparse
 import pandas as pd
-import numpy as np
 from pathlib import Path
 import logging
 from tqdm import tqdm
@@ -11,6 +10,8 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from src.data.database import AccelerometerDB
 from src.data.calibration import AccelerometerCalibrator
+from src.data.sync import TimeSynchronizer
+from src.utils.helpers import calculate_sample_rate
 
 # Setup logging
 logging.basicConfig(
@@ -23,6 +24,8 @@ logger = logging.getLogger(__name__)
 def calibrate_data(input_dir: str, 
                    output_dir: str,
                    calibration_file: str,
+                   behavior_file: str = None,
+                   deployment_file: str = None,
                    bird_limit: int = None,
                    samples_per_bird: int = None):
     """
@@ -32,6 +35,8 @@ def calibrate_data(input_dir: str,
         input_dir: Directory containing raw data (with database)
         output_dir: Directory to save calibrated data
         calibration_file: Path to calibration recordings CSV
+        behavior_file: Path to behavior observation CSV
+        deployment_file: Path to deployment metadata CSV
         bird_limit: Limit number of birds to process (None = all)
         samples_per_bird: Limit samples per bird (None = all)
     """
@@ -50,20 +55,21 @@ def calibrate_data(input_dir: str,
     try:
         cal_data = calibrator.load_calibration_data(calibration_file)
         cal_params = calibrator.estimate_calibration_parameters(cal_data)
-        
-        logger.info("Calibration parameters:")
-        for key, value in cal_params.items():
-            logger.info(f"  {key}: {value:.4f}")
-        
-        # Save calibration parameters
-        param_file = output_path / 'calibration_params.json'
-        calibrator.save_calibration_params(str(param_file))
-        logger.info(f"✓ Saved calibration parameters to {param_file}")
-        
     except FileNotFoundError:
-        logger.error(f"Calibration file not found: {calibration_file}")
-        logger.info("Exiting without calibration.")
-        return
+        logger.warning(
+            "Calibration file not found: %s. Using identity calibration.",
+            calibration_file,
+        )
+        cal_params = calibrator.estimate_calibration_parameters(pd.DataFrame())
+
+    logger.info("Calibration parameters:")
+    for key, value in cal_params.items():
+        logger.info(f"  {key}: {value:.4f}")
+
+    # Save calibration parameters
+    param_file = output_path / 'calibration_params.json'
+    calibrator.save_calibration_params(str(param_file))
+    logger.info(f"✓ Saved calibration parameters to {param_file}")
     
     # Step 2: Load raw data from database
     logger.info("\nStep 2: Loading raw data from database...")
@@ -75,6 +81,38 @@ def calibrate_data(input_dir: str,
     
     db = AccelerometerDB(str(db_path))
     bird_ids = db.get_bird_ids()
+    synchronizer = TimeSynchronizer()
+
+    if behavior_file is None:
+        behavior_file = str(Path(input_dir) / 'ruff_behaviour_tidy_2022-11-16.csv')
+    if deployment_file is None:
+        deployment_file = str(Path(input_dir) / 'logger_deployment_notes.csv')
+
+    behavior_data = None
+    if Path(behavior_file).exists():
+        behavior_data = pd.read_csv(behavior_file)
+        behavior_data = behavior_data.rename(
+            columns={
+                'behaviour': 'behavior',
+                'start_dt_real': 'start_time',
+                'stop_dt_real': 'end_time',
+            }
+        )
+        behavior_data['start_time'] = pd.to_datetime(behavior_data['start_time'])
+        behavior_data['end_time'] = pd.to_datetime(behavior_data['end_time'])
+        behavior_data['recording_id'] = behavior_data['recording_id'].astype(str)
+    else:
+        logger.warning("Behavior file not found: %s", behavior_file)
+
+    deployment_lookup = {}
+    if Path(deployment_file).exists():
+        deployment = pd.read_csv(deployment_file)
+        deployment['recording_id'] = deployment['recording_id'].astype(str)
+        deployment_lookup = (
+            deployment.set_index('recording_id')['ruff_id_number'].astype(str).to_dict()
+        )
+    else:
+        logger.warning("Deployment metadata file not found: %s", deployment_file)
     
     if bird_limit:
         bird_ids = bird_ids[:bird_limit]
@@ -87,7 +125,7 @@ def calibrate_data(input_dir: str,
     
     calibrated_files = []
     
-    for bird_id in tqdm(bird_ids, desc="Processing birds"):
+    for bird_id in tqdm(bird_ids, desc="Processing recordings"):
         try:
             # Load raw data
             raw_data = db.query_raw_data(bird_id, limit=samples_per_bird)
@@ -96,14 +134,35 @@ def calibrate_data(input_dir: str,
                 logger.warning(f"No data for {bird_id}, skipping")
                 continue
             
-            # Add bird ID
-            raw_data['bird_id'] = bird_id
+            raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'])
+            raw_data['recording_id'] = str(bird_id)
+            raw_data['bird_id'] = deployment_lookup.get(str(bird_id), str(bird_id))
+
+            if behavior_data is not None:
+                recording_behavior = behavior_data[
+                    behavior_data['recording_id'] == str(bird_id)
+                ][['start_time', 'end_time', 'behavior']]
+                if not recording_behavior.empty:
+                    raw_data = synchronizer.align_timestamps(
+                        raw_data,
+                        recording_behavior,
+                        time_offset=None,
+                    )
+                else:
+                    raw_data['behavior'] = 'unknown'
+            else:
+                raw_data['behavior'] = 'unknown'
             
             # Apply calibration
             calibrated_data = calibrator.apply_calibration(raw_data)
             
             # Calculate additional metrics
-            calibrated_data = calibrator.calculate_static_acceleration(calibrated_data)
+            sample_rate = calculate_sample_rate(calibrated_data['timestamp'])
+            static_window = int(round(sample_rate)) if sample_rate else 50
+            calibrated_data = calibrator.calculate_static_acceleration(
+                calibrated_data,
+                window_size=static_window,
+            )
             calibrated_data = calibrator.calculate_dynamic_acceleration(calibrated_data)
             calibrated_data['vedba'] = calibrator.calculate_vedba(calibrated_data)
             
@@ -175,14 +234,28 @@ def main():
         '--bird-limit',
         type=int,
         default=None,
-        help='Limit number of birds to process (default: all)'
+        help='Limit number of recordings to process (default: all)'
     )
     
     parser.add_argument(
         '--samples-per-bird',
         type=int,
         default=None,
-        help='Limit samples per bird (default: all)'
+        help='Limit samples per recording (default: all)'
+    )
+
+    parser.add_argument(
+        '--behavior-file',
+        type=str,
+        default='data/raw/ruff_behaviour_tidy_2022-11-16.csv',
+        help='Path to behavior observation file'
+    )
+
+    parser.add_argument(
+        '--deployment-file',
+        type=str,
+        default='data/raw/logger_deployment_notes.csv',
+        help='Path to deployment metadata file'
     )
     
     args = parser.parse_args()
@@ -191,6 +264,8 @@ def main():
         input_dir=args.input,
         output_dir=args.output,
         calibration_file=args.calibration_file,
+        behavior_file=args.behavior_file,
+        deployment_file=args.deployment_file,
         bird_limit=args.bird_limit,
         samples_per_bird=args.samples_per_bird
     )
