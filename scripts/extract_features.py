@@ -23,7 +23,8 @@ def extract_features(input_dir: str,
                     output_dir: str,
                     window_size: float = 1.0,
                     overlap: float = 0.5,
-                    sampling_rate: float = 25.0,
+                    sampling_rate: float = 50.0,
+                    min_label_purity: float = 0.8,
                     bird_limit: int = None):
     """
     Extract features from calibrated data
@@ -34,6 +35,7 @@ def extract_features(input_dir: str,
         window_size: Window size in seconds
         overlap: Overlap fraction (0-1)
         sampling_rate: Sampling rate in Hz
+        min_label_purity: Minimum majority-label purity required per window
         bird_limit: Limit number of birds to process
     """
     logger.info("="*60)
@@ -86,14 +88,30 @@ def extract_features(input_dir: str,
             
             # Filter to required columns
             required_cols = ['acc_x', 'acc_y', 'acc_z']
-            optional_cols = ['behavior', 'bird_id', 'timestamp']
+            optional_cols = [
+                'behavior',
+                'bird_id',
+                'recording_id',
+                'timestamp',
+                'vedba',
+            ]
             
             cols_to_keep = required_cols + [c for c in optional_cols 
                                            if c in data.columns]
             data = data[cols_to_keep]
             
             # Extract features
-            features = extractor.process_dataset(data)
+            features = extractor.process_dataset(
+                data,
+                min_label_purity=min_label_purity,
+                drop_unknown=True,
+            )
+            if features.empty:
+                logger.warning(
+                    "No sufficiently pure labeled windows for %s; skipping",
+                    bird_id,
+                )
+                continue
             
             all_features.append(features)
             
@@ -180,8 +198,15 @@ def main():
     parser.add_argument(
         '--sampling-rate',
         type=float,
-        default=25.0,
-        help='Sampling rate in Hz (default: 25.0)'
+        default=50.0,
+        help='Sampling rate in Hz (default: 50.0)'
+    )
+
+    parser.add_argument(
+        '--min-label-purity',
+        type=float,
+        default=0.8,
+        help='Minimum majority-label purity per window (default: 0.8)'
     )
     
     parser.add_argument(
@@ -199,6 +224,7 @@ def main():
         window_size=args.window_size,
         overlap=args.overlap,
         sampling_rate=args.sampling_rate,
+        min_label_purity=args.min_label_purity,
         bird_limit=args.bird_limit
     )
 
