@@ -32,12 +32,21 @@ class BehaviorEvaluator:
 
         #Pre-class metrics
         precision, recall, f1, support = precision_recall_fscore_support(
-            y_true, y_pred, average = None, labels = self.behavior_classes
+            y_true,
+            y_pred,
+            average=None,
+            labels=self.behavior_classes,
+            zero_division=0,
         )
 
         #Weighted averages
         precision_weighted, recall_weighted, f1_weighted, _ = \
-          precision_recall_fscore_support(y_true, y_pred, average = 'weighted')
+          precision_recall_fscore_support(
+              y_true,
+              y_pred,
+              average='weighted',
+              zero_division=0,
+          )
         
         metrics = {
             'accuracy': accuracy,
@@ -93,7 +102,9 @@ class BehaviorEvaluator:
                                    y_pred: np.ndarray):
         """Print detailed classification report"""
         print(classification_report(y_true, y_pred, 
-                                   target_names=self.behavior_classes))
+                                   labels=self.behavior_classes,
+                                   target_names=self.behavior_classes,
+                                   zero_division=0))
     
     def compare_models(self, results: Dict[str, Dict]) -> pd.DataFrame:
         """
