@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
@@ -77,7 +79,7 @@ class BehaviorVisualizer:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             self.logger.info(f"Saved confusion matrix to {save_path}")
         
-        plt.show()
+        plt.close(fig)
 
     def plot_class_performance(self,
                               results_df: pd.DataFrame,
@@ -113,7 +115,7 @@ class BehaviorVisualizer:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             self.logger.info(f"Saved class performance to {save_path}")
         
-        plt.show()
+        plt.close(fig)
 
     def plot_model_comparison(self,
                              comparison_df: pd.DataFrame,
@@ -151,7 +153,7 @@ class BehaviorVisualizer:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             self.logger.info(f"Saved model comparison to {save_path}")
         
-        plt.show()
+        plt.close(fig)
 
     def plot_feature_importance(self,
                                importance_df: pd.DataFrame,
@@ -183,7 +185,7 @@ class BehaviorVisualizer:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             self.logger.info(f"Saved feature importance to {save_path}")
         
-        plt.show()
+        plt.close(fig)
 
     def plot_training_history(self,
                              history: Dict,
@@ -222,7 +224,7 @@ class BehaviorVisualizer:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             self.logger.info(f"Saved training history to {save_path}")
         
-        plt.show()
+        plt.close(fig)
 
     def plot_hmm_transition_matrix(self,
                                    trans_matrix: pd.DataFrame,
@@ -249,7 +251,7 @@ class BehaviorVisualizer:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             self.logger.info(f"Saved transition matrix to {save_path}")
         
-        plt.show()
+        plt.close(fig)
 
     def plot_behavior_timeline(self,
                               timestamps: pd.Series,
@@ -297,7 +299,7 @@ class BehaviorVisualizer:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             self.logger.info(f"Saved timeline to {save_path}")
         
-        plt.show()
+        plt.close(fig)
     
     def plot_accelerometer_data(self,
                                data: pd.DataFrame,
@@ -338,7 +340,7 @@ class BehaviorVisualizer:
             plt.savefig(save_path, dpi=300, bbox_inches='tight')
             self.logger.info(f"Saved accelerometer plot to {save_path}")
         
-        plt.show()
+        plt.close(fig)
     
     def create_summary_report(self,
                              results: Dict,
