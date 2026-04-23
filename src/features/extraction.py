@@ -19,7 +19,7 @@ class FeatureExtractor:
         self.overlap = overlap
         self.sampling_rate = sampling_rate
         self.window_samples = int(window_size * sampling_rate)
-        self.step_samples = int(self.window_samples * (1 - overlap))
+        self.step_samples = max(1, int(self.window_samples * (1 - overlap)))
 
     def create_windows(self, data: pd.DataFrame) -> List[pd.DataFrame]:
         """
@@ -150,16 +150,28 @@ class FeatureExtractor:
         features.update(self.extract_frequency_domain_features(window))
 
         # Add window metadata
+        if 'window_id' in window.columns:
+            features['window_id'] = window['window_id'].iloc[0]
         if 'behavior' in window.columns:
             features['behavior'] = window['behavior'].mode()[0]
+            features['label_purity'] = (
+                window['behavior'].value_counts(normalize=True).iloc[0]
+            )
         if 'bird_id' in window.columns:
             features['bird_id'] = window['bird_id'].iloc[0]
+        if 'recording_id' in window.columns:
+            features['recording_id'] = window['recording_id'].iloc[0]
         if 'timestamp' in window.columns:
             features['timestamp'] = window['timestamp'].iloc[0]
 
         return features
     
-    def process_dataset(self, data: pd.DataFrame) -> pd.DataFrame:
+    def process_dataset(
+        self,
+        data: pd.DataFrame,
+        min_label_purity: float = 0.8,
+        drop_unknown: bool = True,
+    ) -> pd.DataFrame:
         """
         Process entire dataset: create windows and extract features
         
@@ -173,6 +185,13 @@ class FeatureExtractor:
         features_list = []
         
         for window in windows:
+            if 'behavior' in window.columns:
+                purity = window['behavior'].value_counts(normalize=True).iloc[0]
+                label = window['behavior'].mode()[0]
+                if drop_unknown and label == 'unknown':
+                    continue
+                if purity < min_label_purity:
+                    continue
             features = self.extract_all_features(window)
             features_list.append(features)
         
@@ -189,7 +208,6 @@ class FeatureExtractor:
 
 
         
-
 
 
 
